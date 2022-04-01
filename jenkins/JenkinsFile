@@ -1,12 +1,72 @@
-node('jenkins-slave') {
-    
-     stage('test pipeline') {
-        sh(script: """
-            echo "hello"
-           git clone https://github.com/marcel-dempers/docker-development-youtube-series.git
-           cd ./docker-development-youtube-series/golang
-           
-           docker build . -t test
-        """)
+pipeline {
+  agent {
+    kubernetes {
+      yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  name: buildah
+spec:
+  containers:
+  - name: buildah
+    image: quay.io/buildah/stable:v1.23.1
+    command:
+    - cat
+    tty: true
+    securityContext:
+      privileged: true
+    volumeMounts:
+      - name: varlibcontainers
+        mountPath: /var/lib/containers
+  volumes:
+    - name: varlibcontainers
+'''   
     }
+  }
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    durabilityHint('PERFORMANCE_OPTIMIZED')
+    disableConcurrentBuilds()
+  }
+  environment {
+    DH_CREDS=credentials('dh-creds')
+  }
+  node('jenins-slave') {
+    stage('Build with Buildah') {
+      steps {
+        container('buildah') {
+          sh 'buildah build -t twyler/jnlp-slave:8.5-230 ./dockerfiles'
+        }
+      }
+    }
+    stage('Login to Docker Hub') {
+      steps {
+        container('buildah') {
+          sh 'echo $DH_CREDS_PSW | buildah login -u $DH_CREDS_USR --password-stdin docker.io'
+        }
+      }
+    }
+    stage('tag image') {
+      steps {
+        container('buildah') {
+          sh 'buildah tag twyler/jnlp-slave:8.5-230 twyler/jnlp-slave:latest'
+        }
+      }
+    }
+    stage('push image') {
+      steps {
+        container('buildah') {
+          sh 'buildah push twyler/jnlp-slave:8.5-230'
+          sh 'buildah push twyler/jnlp-slave:latest'
+        }
+      }
+    }
+  }
+  post {
+    always {
+      container('buildah') {
+        sh 'buildah logout docker.io'
+      }
+    }
+  }
 }
