@@ -31,7 +31,7 @@ spec:
   environment {
     DH_CREDS=credentials('dh-creds')
   }
-  node('jenins-slave') {
+  stages {
     stage('Build with Buildah') {
       steps {
         container('buildah') {
